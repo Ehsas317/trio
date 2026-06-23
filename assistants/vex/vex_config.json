@@ -1,0 +1,9 @@
+{
+    "video_input_dir": "~/trio_project_m4/assistants/vex/video_input",
+    "clip_output_dir": "~/trio_project_m4/assistants/vex/clips_output",
+    "metadata_output_dir": "~/trio_project_m4/assistants/vex/metadata_output",
+    "log_level": "INFO",
+    "scenedetect_threshold": 30.0,
+    "min_scene_duration_sec": 2.0,
+    "clip_padding_sec": 0.5
+}
