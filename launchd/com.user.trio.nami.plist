@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.trio.nami</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/USERNAME/trio_project_m4/.venv/bin/python</string>
+        <string>/Users/USERNAME/trio_project_m4/assistants/nami/nami_main.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/USERNAME/trio_project_m4/assistants/nami</string>
+    <key>StandardOutPath</key>
+    <string>/Users/USERNAME/trio_project_m4/logs/nami/nami_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/USERNAME/trio_project_m4/logs/nami/nami_stderr.log</string>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
