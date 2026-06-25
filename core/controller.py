@@ -51,6 +51,10 @@ class ModelController:
         self.assistant_pids: Dict[str, Optional[int]] = {
             name: None for name in ASSISTANT_SCRIPTS
         }
+        # FIX BUG-TRIO-002: Track open file descriptors for cleanup
+        self._assistant_log_fds: Dict[str, tuple] = {
+            name: (None, None) for name in ASSISTANT_SCRIPTS
+        }
         self.command_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
         self._stop_event = threading.Event()
         self.command_processor_thread = threading.Thread(
@@ -165,12 +169,23 @@ class ModelController:
         try:
             log_dir = PROJECT_DIR / "logs" / name
             log_dir.mkdir(parents=True, exist_ok=True)
+
+            # FIX BUG-TRIO-002: Open log files explicitly so we can close them later.
+            # Previously these were opened inline and leaked file descriptors.
+            stdout_path = log_dir / f"{name}_stdout.log"
+            stderr_path = log_dir / f"{name}_stderr.log"
+            stdout_f = open(stdout_path, "a")
+            stderr_f = open(stderr_path, "a")
+
             process = subprocess.Popen(
                 [python_executable, str(script_path)],
                 env=env,
-                stdout=open(log_dir / f"{name}_stdout.log", "a"),
-                stderr=open(log_dir / f"{name}_stderr.log", "a"),
+                stdout=stdout_f,
+                stderr=stderr_f,
             )
+            # Store file descriptors for cleanup in _terminate_process
+            self._assistant_log_fds[name] = (stdout_f, stderr_f)
+
             self.assistant_processes[name] = process
             self.assistant_pids[name] = process.pid
             self.logger.info(f"Assistant '{name}' started with PID {process.pid}.")
@@ -183,6 +198,8 @@ class ModelController:
                 self.state_manager.update_status(name, status="active", task="Initializing")
         except Exception as e:
             self.logger.error(f"Failed to start '{name}': {e}", exc_info=True)
+            # Clean up any opened file descriptors on failure
+            self._close_log_fds(name)
             self.assistant_processes[name] = None
             self.assistant_pids[name] = None
             self.state_manager.update_status(name, status="error", task=f"Failed to start: {e}")
@@ -194,8 +211,7 @@ class ModelController:
             self.logger.warning(f"Assistant '{name}' not running.")
             if self.state_manager.load_state(name).status != "idle":
                 self.state_manager.update_status(name, status="idle")
-            self.assistant_processes[name] = None
-            self.assistant_pids[name] = None
+            self._cleanup_assistant(name)
             return
         self.logger.info(f"Stopping '{name}' (PID {pid}). Force={force}")
         self.state_manager.update_status(name, status="idle")
@@ -205,8 +221,7 @@ class ModelController:
         proc = self.assistant_processes.get(name)
         pid = self.assistant_pids.get(name)
         if not proc or not pid or proc.poll() is not None:
-            self.assistant_processes[name] = None
-            self.assistant_pids[name] = None
+            self._cleanup_assistant(name)
             return
         try:
             if not force:
@@ -224,8 +239,29 @@ class ModelController:
         except Exception as e:
             self.logger.error(f"Error terminating '{name}': {e}")
         finally:
-            self.assistant_processes[name] = None
-            self.assistant_pids[name] = None
+            # FIX BUG-TRIO-002: Always close the log file descriptors
+            self._close_log_fds(name)
+            self._cleanup_assistant(name)
+
+    def _close_log_fds(self, name: str) -> None:
+        """Close log file descriptors for an assistant."""
+        stdout_f, stderr_f = self._assistant_log_fds.get(name, (None, None))
+        try:
+            if stdout_f:
+                stdout_f.close()
+        except Exception:
+            pass
+        try:
+            if stderr_f:
+                stderr_f.close()
+        except Exception:
+        pass
+        self._assistant_log_fds[name] = (None, None)
+
+    def _cleanup_assistant(self, name: str) -> None:
+        """Clean up assistant process tracking state."""
+        self.assistant_processes[name] = None
+        self.assistant_pids[name] = None
 
     def _signal_assistant(self, name: str, sig: int) -> None:
         proc = self.assistant_processes.get(name)
