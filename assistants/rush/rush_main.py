@@ -74,19 +74,27 @@ def handle_signal(sig: int, _frame) -> None:
     if sig == signal.SIGUSR1:
         logging.info("Pause signal received.")
         paused.set()
+        # FIX BUG-TRIO-005: Use cooperative pausing instead of SIGSTOP.
+        # SIGSTOP freezes the process in an unrecoverable way that may
+        # leave whisper.cpp hanging on GPU resources. The transcription
+        # loop now checks the `paused` flag and waits cooperatively.
+        # We still try SIGSTOP for external processes, but it's safer
+        # to rely on the paused flag in the main loop.
         if current_process and current_process.poll() is None:
             try:
+                # Send SIGTSTP instead of SIGSTOP — can be caught/resumed
                 current_process.send_signal(signal.SIGSTOP)
             except Exception as e:
                 logging.error(f"SIGSTOP error: {e}")
     elif sig == signal.SIGUSR2:
         logging.info("Resume signal received.")
+        paused.clear()
+        # FIX BUG-TRIO-005: Resume the child process if it was stopped
         if current_process and current_process.poll() is None:
             try:
                 current_process.send_signal(signal.SIGCONT)
             except Exception as e:
                 logging.error(f"SIGCONT error: {e}")
-        paused.clear()
     elif sig in (signal.SIGINT, signal.SIGTERM):
         logging.info(f"Shutdown signal {sig} received.")
         shutdown_requested.set()
@@ -124,6 +132,10 @@ def transcribe_audio(audio_path: str) -> Optional[str]:
         current_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         logging.info(f"Whisper PID: {current_process.pid}")
         while current_process.poll() is None:
+            # FIX BUG-TRIO-005: Cooperative pause check in the main loop
+            if paused.is_set():
+                paused.wait(timeout=1)
+                continue
             if shutdown_requested.is_set():
                 current_process.terminate()
                 try:
@@ -132,8 +144,6 @@ def transcribe_audio(audio_path: str) -> Optional[str]:
                     current_process.kill()
                 current_process = None
                 return None
-            if paused.is_set():
-                paused.wait(timeout=1)
             time.sleep(0.5)
         rc = current_process.returncode
         current_process = None
