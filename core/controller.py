@@ -255,7 +255,7 @@ class ModelController:
             if stderr_f:
                 stderr_f.close()
         except Exception:
-        pass
+            pass
         self._assistant_log_fds[name] = (None, None)
 
     def _cleanup_assistant(self, name: str) -> None:
