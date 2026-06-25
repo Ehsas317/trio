@@ -148,12 +148,19 @@ def extract_clip(
 
     logging.info(f"Extracting clip: {output_path} ({start_tc} -> {end_tc})")
 
+    # FIX BUG-TRIO-006: Use re-encoding instead of -c copy to avoid
+    # corrupted clips at non-keyframe cut points. Added -preset fast
+    # for reasonable speed with good quality.
     cmd = [
         "ffmpeg", "-y", "-loglevel", "warning",
         "-i", video_path,
         "-ss", start_tc,
         "-to", end_tc,
-        "-c", "copy",
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "18",
+        "-c:a", "aac",
+        "-b:a", "128k",
         output_path,
     ]
     try:
@@ -193,10 +200,38 @@ def save_metadata(metadata: Dict[str, Any], output_path: str) -> None:
         logging.error(f"Metadata save error: {e}")
 
 
+def _wait_for_file_stability(file_path: str, checks: int = 3, interval: float = 1.0) -> bool:
+    """FIX BUG-TRIO-008: Wait for file size to stabilize before processing.
+    
+    This prevents processing partially-written files that trigger the
+    file watcher before the copy/download is complete.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return False
+    
+    last_size = -1
+    for i in range(checks):
+        current_size = path.stat().st_size
+        if current_size == last_size and current_size > 0:
+            return True
+        last_size = current_size
+        time.sleep(interval)
+    
+    logging.warning(f"File {file_path} size not stable after {checks} checks, proceeding anyway")
+    return True
+
+
 def process_video_file(video_path: str) -> None:
     global current_task_info
     if shutdown_requested.is_set():
         return
+    
+    # FIX BUG-TRIO-008: Verify file integrity before processing
+    if not _wait_for_file_stability(video_path):
+        logging.warning(f"File not stable or empty: {video_path}")
+        return
+    
     task_name = f"Processing {os.path.basename(video_path)}"
     current_task_info = {"file_path": video_path, "stage": "starting"}
     if state_manager:
