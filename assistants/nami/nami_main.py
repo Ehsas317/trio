@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import os
 import shlex
 import signal
@@ -147,9 +148,12 @@ async def cmd_run_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Executing...")
     try:
         cwd = context.user_data.get("cwd", str(Path.home()))
-        args = shlex.split(command_text)
+        # FIX BUG-TRIO-001: Use shell=True to support pipes, redirects, and env vars.
+        # Security: This runs on a local Mac Mini with restricted user access only.
+        # The `restricted` decorator ensures only allowed_user_ids can execute commands.
         result = subprocess.run(
-            args, capture_output=True, text=True, timeout=30, cwd=cwd
+            command_text, capture_output=True, text=True, timeout=30, cwd=cwd,
+            shell=True, executable="/bin/bash"
         )
         output = (result.stdout or "")[:3000]
         err_output = (result.stderr or "")[:3000]
@@ -184,7 +188,15 @@ def _get_cwd(context: ContextTypes.DEFAULT_TYPE, new_path: Optional[str] = None)
         return current
     proposed = str(Path(current) / Path(new_path).expanduser())
     proposed = str(Path(proposed).resolve())
-    if proposed.startswith(base_dir) and os.path.isdir(proposed):
+    # FIX BUG-TRIO-001: Better path traversal prevention using Path comparison
+    try:
+        proposed_path = Path(proposed).resolve()
+        home_path = Path(base_dir).resolve()
+        if home_path not in proposed_path.parents and proposed_path != home_path:
+            return f"Error: Invalid path: {proposed}"
+    except Exception:
+        return f"Error: Invalid path: {proposed}"
+    if os.path.isdir(proposed):
         context.user_data["cwd"] = proposed
         return proposed
     return f"Error: Invalid path: {proposed}"
@@ -251,6 +263,17 @@ async def cmd_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not os.path.isfile(target):
             await update.message.reply_text("File not found.")
             return
+
+        # FIX BUG-TRIO-007: Check MIME type and reject binary files
+        mime_type, _ = mimetypes.guess_type(target)
+        if mime_type and not mime_type.startswith(("text/", "application/json", "application/xml", "application/javascript")):
+            await update.message.reply_text(
+                f"Cannot read binary file: `{os.path.basename(target)}` ({mime_type})\n"
+                f"Text files only.",
+                parse_mode="Markdown"
+            )
+            return
+
         with open(target, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
         total = len(lines)
