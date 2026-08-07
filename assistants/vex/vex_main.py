@@ -82,19 +82,13 @@ def handle_signal(sig: int, _frame) -> None:
     if sig == signal.SIGUSR1:
         logging.info("Pause signal received.")
         paused.set()
-        if current_process and current_process.poll() is None:
-            try:
-                current_process.send_signal(signal.SIGSTOP)
-            except Exception as e:
-                logging.error(f"SIGSTOP error: {e}")
+        # FIX BUG-TRIO-005: Use cooperative pausing only.
+        # The extraction loop checks the `paused` flag and waits cooperatively.
+        # This avoids freezing GPU resources with SIGSTOP.
     elif sig == signal.SIGUSR2:
         logging.info("Resume signal received.")
-        if current_process and current_process.poll() is None:
-            try:
-                current_process.send_signal(signal.SIGCONT)
-            except Exception as e:
-                logging.error(f"SIGCONT error: {e}")
         paused.clear()
+        # FIX BUG-TRIO-005: Cooperative resume - just clear the pause flag.
     elif sig in (signal.SIGINT, signal.SIGTERM):
         logging.info(f"Shutdown signal {sig} received.")
         shutdown_requested.set()

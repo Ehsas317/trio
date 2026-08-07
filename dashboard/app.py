@@ -145,6 +145,12 @@ def api_status():
     return jsonify(get_status_data())
 
 
+@app.route("/health")
+def health_check():
+    """Health check endpoint for monitoring."""
+    return jsonify({"status": "ok", "service": "trio-dashboard"})
+
+
 @app.route("/control", methods=["POST"])
 @require_auth
 def control_assistant():
@@ -177,7 +183,7 @@ def main() -> None:
     host = config.get("host", "127.0.0.1")
     port = config.get("port", 5001)
     app.logger.info(f"Dashboard at http://{host}:{port}")
-    # SECURITY NOTE: Default is now 127.0.0.1. To expose externally,
+    # SECURITY NOTE: Default is 127.0.0.1 (localhost only). To expose externally,
     # set "host": "0.0.0.0" in dashboard.json AND configure a password
     # in the "auth" section.
     app.run(host=host, port=port, debug=False)

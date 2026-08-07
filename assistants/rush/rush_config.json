@@ -1,6 +1,6 @@
 {
     "whisper_model_path": "~/trio_project_m4/models/whisper/ggml-medium.en.bin",
-    "whisper_executable": "whisper",
+    "whisper_executable": "whisper-cpp",
     "whisper_processing_threads": 4,
     "ollama_model_name": "llama3:8b",
     "audio_input_dir": "~/trio_project_m4/assistants/rush/audio_input",

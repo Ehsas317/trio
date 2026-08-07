@@ -24,7 +24,7 @@ fi
 
 # Install system dependencies
 echo "Installing system dependencies..."
-brew install python@3.11 ffmpeg git whisper.cpp ollama
+brew install python@3.11 ffmpeg git whisper-cpp ollama
 
 # Create project directory
 echo "Setting up project at $PROJECT_DIR..."
@@ -57,6 +57,30 @@ mkdir -p assistants/rush/{audio_input,transcripts,summaries}
 mkdir -p assistants/vex/{video_input,clips_output,metadata_output}
 mkdir -p assistants/nami/{cache,downloads}
 
+# Generate launchd plist files from templates
+echo "Generating launchd service files..."
+VENV_PYTHON="$PROJECT_DIR/.venv/bin/python"
+LOG_DIR="$PROJECT_DIR/logs"
+
+for template in "$PROJECT_DIR/launchd/templates/"*.template; do
+    if [ -f "$template" ]; then
+        basename=$(basename "$template" .template)
+        sed \
+            -e "s|{{VENV_PYTHON}}|$VENV_PYTHON|g" \
+            -e "s|{{NAMI_SCRIPT}}|$PROJECT_DIR/assistants/nami/nami_main.py|g" \
+            -e "s|{{NAMI_DIR}}|$PROJECT_DIR/assistants/nami|g" \
+            -e "s|{{RUSH_SCRIPT}}|$PROJECT_DIR/assistants/rush/rush_main.py|g" \
+            -e "s|{{RUSH_DIR}}|$PROJECT_DIR/assistants/rush|g" \
+            -e "s|{{VEX_SCRIPT}}|$PROJECT_DIR/assistants/vex/vex_main.py|g" \
+            -e "s|{{VEX_DIR}}|$PROJECT_DIR/assistants/vex|g" \
+            -e "s|{{DASHBOARD_SCRIPT}}|$PROJECT_DIR/dashboard/app.py|g" \
+            -e "s|{{DASHBOARD_DIR}}|$PROJECT_DIR/dashboard|g" \
+            -e "s|{{LOG_DIR}}|$LOG_DIR|g" \
+            "$template" > "$PROJECT_DIR/launchd/$basename"
+        echo "  Generated: $basename"
+    fi
+done
+
 # Download whisper model if not present
 WHISPER_MODEL="$PROJECT_DIR/models/whisper/ggml-medium.en.bin"
 if [ ! -f "$WHISPER_MODEL" ]; then
@@ -86,7 +110,10 @@ echo ""
 echo "3. Run an assistant:"
 echo "   python $PROJECT_DIR/assistants/nami/nami_main.py"
 echo ""
-echo "4. Or setup launchd auto-start:"
+echo "4. Or setup launchd auto-start (plist files are now generated with correct paths):"
 echo "   cp $PROJECT_DIR/launchd/*.plist ~/Library/LaunchAgents/"
-echo "   # Remember to update USERNAME in the plist files!"
+echo "   launchctl load ~/Library/LaunchAgents/com.user.trio.nami.plist"
+echo "   launchctl load ~/Library/LaunchAgents/com.user.trio.rush.plist"
+echo "   launchctl load ~/Library/LaunchAgents/com.user.trio.vex.plist"
+echo "   launchctl load ~/Library/LaunchAgents/com.user.trio.dashboard.plist"
 echo ""

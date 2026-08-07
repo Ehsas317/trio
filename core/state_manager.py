@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
-import os
+import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 STATE_DIR = Path.home() / "trio_project_m4" / "shared" / "state"
 ASSISTANT_NAMES = ["nami", "rush", "vex"]
+
+logger = logging.getLogger("StateManager")
 
 
 class AssistantState:
@@ -60,7 +62,7 @@ class StateManager:
         try:
             self.state_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            print(f"Error creating state directory {self.state_dir}: {e}")
+            logger.error(f"Error creating state directory {self.state_dir}: {e}")
 
     def _get_state_file_path(self, assistant_name: str) -> Path:
         return self.state_dir / f"{assistant_name}_state.json"
@@ -74,7 +76,7 @@ class StateManager:
                 data = json.loads(state_file.read_text(encoding="utf-8"))
                 return AssistantState.from_dict(data)
             except (json.JSONDecodeError, IOError, TypeError) as e:
-                print(f"Error loading state for {assistant_name}: {e}. Returning default.")
+                logger.error(f"Error loading state for {assistant_name}: {e}. Returning default.")
         return AssistantState(assistant_name)
 
     def save_state(self, state: AssistantState) -> None:
@@ -86,7 +88,7 @@ class StateManager:
                 json.dumps(state.to_dict(), indent=4), encoding="utf-8"
             )
         except IOError as e:
-            print(f"Error saving state for {state.name}: {e}")
+            logger.error(f"Error saving state for {state.name}: {e}")
 
     def get_all_states(self) -> Dict[str, AssistantState]:
         return {name: self.load_state(name) for name in self.assistant_names}
@@ -101,7 +103,7 @@ class StateManager:
     ) -> None:
         valid_statuses = {"idle", "active", "paused", "error"}
         if status not in valid_statuses:
-            print(f"Warning: Invalid status '{status}' for {assistant_name}. Using 'error'.")
+            logger.warning(f"Invalid status '{status}' for {assistant_name}. Using 'error'.")
             status = "error"
         state = self.load_state(assistant_name)
         state.status = status

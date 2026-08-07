@@ -1,21 +1,52 @@
-"""Checkpoint Manager - Saves and loads task checkpoints for assistants."""
+"""Checkpoint Manager - Saves and loads task checkpoints for assistants.
+
+Uses JSON for serialization instead of pickle for security.
+"""
 
 from __future__ import annotations
 
 import json
-import os
-import pickle
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 CHECKPOINT_DIR = Path.home() / "trio_project_m4" / "checkpoints"
 ASSISTANT_NAMES = ["nami", "rush", "vex"]
 
 
+class CheckpointEncoder(json.JSONEncoder):
+    """Custom JSON encoder for checkpoint data."""
+
+    def default(self, obj: Any) -> Any:
+        if hasattr(obj, "__dict__"):
+            return obj.__dict__
+        if hasattr(obj, "tolist"):  # numpy arrays
+            return obj.tolist()
+        if hasattr(obj, "isoformat"):  # datetime
+            return obj.isoformat()
+        return super().default(obj)
+
+
+def _json_serializable(data: Any) -> Any:
+    """Convert data to JSON-serializable format."""
+    if data is None or isinstance(data, (str, int, float, bool)):
+        return data
+    if isinstance(data, (list, tuple)):
+        return [_json_serializable(item) for item in data]
+    if isinstance(data, dict):
+        return {str(k): _json_serializable(v) for k, v in data.items()}
+    if hasattr(data, "__dict__"):
+        return _json_serializable(data.__dict__)
+    if hasattr(data, "tolist"):  # numpy arrays
+        return data.tolist()
+    if hasattr(data, "isoformat"):  # datetime
+        return data.isoformat()
+    return str(data)
+
+
 class CheckpointManager:
-    """Manages saving and loading task checkpoints."""
+    """Manages saving and loading task checkpoints using JSON."""
 
     def __init__(
         self,
@@ -36,6 +67,9 @@ class CheckpointManager:
         suffix = uuid.uuid4().hex[:8]
         return f"{assistant_name}_{task_identifier}_{ts}_{suffix}"
 
+    def _get_checkpoint_path(self, assistant_name: str, checkpoint_id: str) -> Path:
+        return self.checkpoint_dir / assistant_name / f"{checkpoint_id}.json"
+
     def save_checkpoint(
         self,
         assistant_name: str,
@@ -46,24 +80,22 @@ class CheckpointManager:
         if assistant_name not in self.assistant_names:
             return None
         cid = self._generate_id(assistant_name, task_identifier)
-        adir = self.checkpoint_dir / assistant_name
-        pkl_path = adir / f"{cid}.pkl"
-        meta_path = adir / f"{cid}.json"
-        full_metadata = {
+        ckpt_path = self._get_checkpoint_path(assistant_name, cid)
+
+        full_data = {
             "checkpoint_id": cid,
             "assistant_name": assistant_name,
             "task_identifier": task_identifier,
             "timestamp": time.time(),
-            "pickle_file": pkl_path.name,
-            "custom_data": metadata or {},
+            "data": _json_serializable(checkpoint_data),
+            "custom_metadata": metadata or {},
         }
+
         try:
-            pkl_path.write_bytes(pickle.dumps(checkpoint_data))
-            meta_path.write_text(json.dumps(full_metadata, indent=4), encoding="utf-8")
+            ckpt_path.write_text(json.dumps(full_data, indent=4, cls=CheckpointEncoder), encoding="utf-8")
             return cid
-        except Exception:
-            pkl_path.unlink(missing_ok=True)
-            meta_path.unlink(missing_ok=True)
+        except Exception as e:
+            ckpt_path.unlink(missing_ok=True)
             return None
 
     def load_checkpoint(self, checkpoint_id: str) -> Optional[Tuple[Any, Dict[str, Any]]]:
@@ -71,21 +103,27 @@ class CheckpointManager:
         dirs = [self.checkpoint_dir / assistant_from_id] if assistant_from_id in self.assistant_names else []
         if not dirs:
             dirs = [self.checkpoint_dir / n for n in self.assistant_names]
-        meta_path = None
+
+        ckpt_path = None
         for d in dirs:
-            mp = d / f"{checkpoint_id}.json"
-            if mp.exists():
-                meta_path = mp
+            cp = d / f"{checkpoint_id}.json"
+            if cp.exists():
+                ckpt_path = cp
                 break
-        if not meta_path:
+
+        if not ckpt_path:
             return None
+
         try:
-            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-            pkl_name = metadata.get("pickle_file", f"{checkpoint_id}.pkl")
-            pkl_path = meta_path.parent / pkl_name
-            if not pkl_path.exists():
-                return None
-            data = pickle.loads(pkl_path.read_bytes())
+            full_data = json.loads(ckpt_path.read_text(encoding="utf-8"))
+            data = full_data.get("data")
+            metadata = {
+                "checkpoint_id": full_data.get("checkpoint_id"),
+                "assistant_name": full_data.get("assistant_name"),
+                "task_identifier": full_data.get("task_identifier"),
+                "timestamp": full_data.get("timestamp"),
+                "custom_metadata": full_data.get("custom_metadata", {}),
+            }
             return data, metadata
         except Exception:
             return None
@@ -118,18 +156,9 @@ class CheckpointManager:
             dirs = [self.checkpoint_dir / n for n in self.assistant_names]
         deleted = False
         for d in dirs:
-            mp = d / f"{checkpoint_id}.json"
-            if mp.exists():
-                try:
-                    meta = json.loads(mp.read_text(encoding="utf-8"))
-                    pkl_name = meta.get("pickle_file")
-                    if pkl_name:
-                        (d / pkl_name).unlink(missing_ok=True)
-                except Exception:
-                    pass
-                pp = d / f"{checkpoint_id}.pkl"
-                mp.unlink(missing_ok=True)
-                pp.unlink(missing_ok=True)
+            cp = d / f"{checkpoint_id}.json"
+            if cp.exists():
+                cp.unlink(missing_ok=True)
                 deleted = True
                 break
         return deleted
